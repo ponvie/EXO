@@ -29,7 +29,7 @@ for pdgIds, mothers in zip(ID_arrays["GenPart_pdgId"], ID_arrays["GenPart_genPar
     for i, pid in enumerate(pdgIds):
         if abs(pid) == 13:  # muone
             mom_idx = mothers[i]
-            if mom_idx >= 0 and pdgIds[mom_idx] == pdgID_darkpion: # proveniente da dark photon
+            if mom_idx >= 0 and pdgIds[mom_idx] == pdgID_darkphoton: # proveniente da dark photon
                 count += 1
     nDPdecayToMu.append(count)
 
