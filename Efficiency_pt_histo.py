@@ -116,7 +116,7 @@ for event in range(len(nGenPart)):
             if dR < deltaR_threshold:
                 n_matched_photons += 1
                 matched = True
-                break
+                
         if matched:
             darkPhoton_pt_matched.append(dp_pt)
             
