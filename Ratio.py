@@ -1,24 +1,32 @@
-numHist = np.histogram(darkPhoton_pt_matched, bins=90)[0]
-denomHist  = np.histogram(darkPhoton_pt_gen, bins=90)[0]
+import numpy as np
+import matplotlib.pyplot as plt
 
-print(numHist)
-print(denomHist)
+numHist, bin_edges = np.histogram(darkPhoton_pt_matched, bins=90)
+denomHist, _ = np.histogram(darkPhoton_pt_gen, bins=90)
 
-eff=[]
+# Bin centers for plotting
+bin_centers = 0.5 * (bin_edges[1:] + bin_edges[:-1])
+
+# Efficiency
+eff = []
 for num, den in zip(numHist, denomHist):
-    if den ==0:
+    if den == 0:
         eff.append(0)
     else:
-        eff.append(num/den)
-        
+        val = num / den
+        eff.append(val)
+
+eff = np.array(eff)
+
+
 plt.figure(figsize=(7,5))
-plt.hist(darkPhoton_pt_gen, bins=80, histtype="step", linewidth=2, label="Generated dark photons")
-plt.hist(darkPhoton_pt_matched, bins=80, histtype="step", linewidth=2, label="Matched dark photons")
-plt.hist(eff, bins=80, histtype="step", linewidth=2, label="Ratio", color="g")
+plt.hist(darkPhoton_pt_gen, bins=90, histtype="step", linewidth=2, label="Generated dark photons")
+plt.hist(darkPhoton_pt_matched, bins=90, histtype="step", linewidth=2, label="Matched dark photons")
+
+plt.errorbar(bin_centers, eff, fmt='o', color="g", capsize=4, label="Efficiency")
+
 plt.xlabel("Dark photon $p_T$ [GeV]")
-plt.ylabel("Events")
-plt.xlabel("Dark photon $p_T$ [GeV]")
-plt.ylabel("Events")
+plt.ylabel("Events / Efficiency")
 plt.legend()
 plt.savefig("Efficiency_darkPhoton_PT_RATIO.png")
 plt.show()
