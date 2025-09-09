@@ -114,46 +114,41 @@ for event in range(len(nGenPart)):
         for vertex in range(len(dimuon_eta)):
             dR = deltaR(dimuon_eta[vertex], dimuon_phi[vertex], darkphoton_eta, darkphoton_phi)
             if dR < deltaR_threshold:
-                n_matched_photons += 1
                 matched = True
                 break
                 
         if matched:
+            n_matched_photons += 1
             darkPhoton_pt_matched.append(dp_pt)
-            
-            
+
 print("Total generated dark photons:", nDarkPho.sum())
 print("Number of matched dark photons:", n_matched_photons)
 Efficiency_percent = Efficiency * 100
 print(f"Matching efficiency (percent): {Efficiency_percent:.2f}%")
 
 
-# Define binning
-bins = np.linspace(0, 100, 20)
 
-# Build numerator and denominator histograms
-denominator, _ = np.histogram(darkPhoton_pt_gen, bins=bins)
-numerator, _   = np.histogram(darkPhoton_pt_matched, bins=bins)
+bins = np.linspace(0, 100, 90) 
+hist_gen, _ = np.histogram(darkPhoton_pt_gen, bins=bins)
+hist_matched, _ = np.histogram(darkPhoton_pt_matched, bins=bins)
 
-# Efficiency
-efficiency = numerator / np.maximum(denominator, 1)
-bin_centers = 0.5 * (bins[:-1] + bins[1:])
+# Ratio between total matched and total generated
+num_gen = hist_gen.sum()
+num_matched = hist_matched.sum()
+eff_global = num_matched / num_gen if num_gen > 0 else 0
 
-
-# Plot
-plt.figure(figsize=(7,5))
+print("Gen Histo:", num_gen)
+print("Matched Histo:", num_matched)
+print(f"Ratio = {eff_global:.4f}")
 
 # Plot
 plt.figure(figsize=(7,5))
 plt.hist(darkPhoton_pt_gen, bins=90, histtype="step", linewidth=2, label="Generated dark photons")
 plt.hist(darkPhoton_pt_matched, bins=90, histtype="step", linewidth=2, label="Matched dark photons")
-#plt.errorbar(bin_centers, efficiency, 
-#             yerr=np.sqrt(efficiency*(1-efficiency)/np.maximum(denominator,1)), 
-#             fmt="o", color="blue", label="Efficiency")
 plt.xlabel("Dark photon $p_T$ [GeV]")
 plt.ylabel("Events")
 plt.xlabel("Dark photon $p_T$ [GeV]")
-plt.ylabel("Efficiency")
+plt.ylabel("Events")
 plt.legend()
 plt.savefig("Efficiency_darkPhoton_PT.png")
 plt.show()
