@@ -104,10 +104,14 @@ for event in range(len(nGenPart)):
         darkphoton_phi = GenPart_phi[event][particle]
         
         # loop over reconstructed vertices and check deltaR with generated dark photons
+        matched=False
         for vertex in range(len(dimuon_eta)):
             dR = deltaR(dimuon_eta[vertex], dimuon_phi[vertex], darkphoton_eta, darkphoton_phi)
             if dR < deltaR_threshold:
-                n_matched_photons += 1
+                matched=True
+                break   
+        if matched:
+            n_matched_photons += 1
                            
 print("Total generated dark photons:", nDarkPho.sum())
 print("Number of matched dark photons:", n_matched_photons)
