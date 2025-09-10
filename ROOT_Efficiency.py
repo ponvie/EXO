@@ -82,8 +82,8 @@ def prepare_dataframe(df_raw):
         .Define("darkPhoton_pt", "GenPart_pt[isDarkPhoton]")
         .Define("darkPhoton_eta", "GenPart_eta[isDarkPhoton]")
         .Define("darkPhoton_phi", "GenPart_phi[isDarkPhoton]")
-        df = df.Define("darkPhoton_flags", f"MatchPhotonFlags(muonSV_mu1pt, muonSV_mu1eta, muonSV_mu1phi, muonSV_mu2pt, muonSV_mu2eta, muonSV_mu2phi, GenPart_pdgId, GenPart_pt, GenPart_eta, GenPart_phi, {pdgID_darkphoton}, 0.105, {deltaR_threshold})")
-        df = df.Define("darkPhoton_pt_matched", "GenPart_pt[isDarkPhoton&&(darkPhoton_flags ==1)]")
+        .Define("darkPhoton_flags", f"MatchPhotonFlags(muonSV_mu1pt, muonSV_mu1eta, muonSV_mu1phi, muonSV_mu2pt, muonSV_mu2eta, muonSV_mu2phi, GenPart_pdgId, GenPart_pt, GenPart_eta, GenPart_phi, {pdgID_darkphoton}, 0.105, {deltaR_threshold})")
+        .Define("darkPhoton_pt_matched", "GenPart_pt[isDarkPhoton&&(darkPhoton_flags ==1)]")
 
 )
         
