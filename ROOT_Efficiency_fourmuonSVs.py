@@ -337,3 +337,86 @@ print("Total dark pions matched to a 4-muonSV, with 2 dark photons matching 2 mu
 # Debug category: events where we reconstruct two dimuonSVs but no 4muonSV
 n_events_problematic = df.Filter("nPions_2ph_2muSV > 0 &&nPions_4muSV == 0").Count().GetValue()
 print("Events with two matched dimuonSVs but NO 4muonSV:", n_events_problematic)
+
+
+
+"""
+Plot:
+
+the same denominator (dark photons that decay into 4 muons)
+= darkpions_into2darkphotons -> into_4muons
+numerators:
+1) Efficiency of matching to at least one muonSV
+= darkpions_into2darkphotons -> each one matching to at least one dimuonSV vertix
+
+2) Efficiency of matching to two muonSVs
+= darkpions_into2darkphotons -> each one matching exactely two dimuonSV vertices
+
+3) Efficiency of matching to a fourmuonSV
+= darkpions_into2darkphotons -> matching a fourmuonSV
+
+4) Efficiency of matching to two muonSVs and a fourmuonSV
+= darkpions matching a fourmuonSV and decaying into 2darkphotons -> each one matching a muonSV vertix
+"""
+
+den_histo = df.Histo1D(
+    ("h_all", "Efficiency;Entries", 90, 0, 100),
+    "darkPion_DEN_pt"
+).Clone()
+
+num1_histo = df.Histo1D(
+    ("h_1", "Efficiency;Entries", 90, 0, 100),
+    "darkPion_NUM1_pt"
+).Clone()
+
+num2_histo = df.Histo1D(
+    ("h_2", "Efficiency;Entries", 90, 0, 100),
+    "darkPion_NUM2_pt"
+).Clone()
+
+num3_histo = df.Histo1D(
+    ("h_3", "Efficiency;Entries", 90, 0, 100),
+    "darkPion_NUM3_pt"
+).Clone()
+
+num4_histo = df.Histo1D(
+    ("h_4", "Efficiency;Entries", 90, 0, 100),
+    "darkPion_NUM4_pt"
+).Clone()
+
+
+print("Den entries:", den_histo.GetEntries())
+print("Num1 entries:", num1_histo.GetEntries())
+print("Num2 entries:", num2_histo.GetEntries())
+print("Num3 entries:", num3_histo.GetEntries())
+print("Num4 entries:", num4_histo.GetEntries())
+
+
+eff1 = ROOT.TEfficiency(num1_histo, den_histo)
+eff2 = ROOT.TEfficiency(num2_histo, den_histo)
+eff3 = ROOT.TEfficiency(num3_histo, den_histo)
+eff4 = ROOT.TEfficiency(num4_histo, den_histo)
+
+eff1.SetMarkerStyle(20); eff1.SetMarkerSize(0.9); eff1.SetMarkerColor(ROOT.kBlack); eff1.SetLineColor(ROOT.kBlack)
+eff2.SetMarkerStyle(21); eff2.SetMarkerSize(0.9); eff2.SetMarkerColor(ROOT.kRed);   eff2.SetLineColor(ROOT.kRed)
+eff3.SetMarkerStyle(22); eff3.SetMarkerSize(0.9); eff3.SetMarkerColor(ROOT.kBlue);  eff3.SetLineColor(ROOT.kBlue)
+eff4.SetMarkerStyle(23); eff4.SetMarkerSize(0.9); eff4.SetMarkerColor(ROOT.kGreen);eff4.SetLineColor(ROOT.kGreen)
+
+c = ROOT.TCanvas()
+c.cd()
+eff1.Draw("AP")  # "AP" = Axis + Points
+eff2.Draw("P same")
+eff3.Draw("P same")
+eff4.Draw("P same")
+
+leg = ROOT.TLegend(0.55,0.15,0.88,0.40)
+leg.SetBorderSize(0)
+leg.AddEntry(eff1, ">= 1 muonSV", "p")
+leg.AddEntry(eff2, "2 muonSVs", "p")
+leg.AddEntry(eff3, "4muonSV", "p")
+leg.AddEntry(eff4, "4muonSV & 2 photon->muonSVs", "p")
+leg.Draw()
+
+c.Update()
+c.SaveAs("EFF_DarkPions_Matched.png")
+
