@@ -2,7 +2,8 @@ import ROOT, os
 
 # --- Input file ------------------------------------------------------------
 dir  = "/Users/veronicapilloni/Desktop/EXO/"
-file = "nano.root"
+#file = "nano.root"
+file = "data_0.root"
 events = ROOT.RDataFrame("Events", os.path.join(dir, file))
 
 # --- PDG IDs and parameters ------------------------------------------------
@@ -313,10 +314,10 @@ df = prepare_dataframe(events)
 df = (df
       .Define("nPions_2ph",       "Sum(isDarkPion_in2darkPhotons)")
       .Define("nPions_2ph_2mu", "Sum(isDarkPion_in2darkPhotons_into2muons)")
-      .Define("nPions_2ph_1muSV", "Sum(darkPion_in2darkPhotons_1muonSV)")
-      .Define("nPions_2ph_2muSV",   "Sum(darkPion_in2darkPhotons_2muonSV)")
+      .Define("nPions_2ph_1muSV", "Sum((isDarkPion_in2darkPhotons_into2muons==1) && (darkPion_in2darkPhotons_1muonSV==1))")
+      .Define("nPions_2ph_2muSV",   "Sum((isDarkPion_in2darkPhotons_into2muons==1) && (darkPion_in2darkPhotons_2muonSV==1))")
       .Define("nPions_4muSV", "Sum(darkPion_into4muonSV_flags)")
-      .Define("nPions_4muSV_2ph_2muSV", "Sum(isDarkPion_FourMuonSV_and_TwoPhotonMuonSVs)") 
+      .Define("nPions_4muSV_2ph_2muSV", "Sum((isDarkPion_in2darkPhotons_into2muons==1) && (isDarkPion_FourMuonSV_and_TwoPhotonMuonSVs==1))") 
      )
 # --- Global counts ---------------------------------------------------------
 total_pions_2ph      = df.Sum("nPions_2ph").GetValue()
@@ -339,7 +340,7 @@ n_events_problematic = df.Filter("nPions_2ph_2muSV > 0 &&nPions_4muSV == 0").Cou
 print("Events with two matched dimuonSVs but NO 4muonSV:", n_events_problematic)
 
 
-
+#Efficiency
 """
 Plot:
 
@@ -419,4 +420,213 @@ leg.Draw()
 
 c.Update()
 c.SaveAs("EFF_DarkPions_Matched.png")
+
+eff_perc = (num4_histo.Integral()/den_histo.Integral()) * 100
+print(f"Effciency = {eff_perc:.4f} %")
+
+#Purity
+#Purity
+ROOT.gInterpreter.Declare("""
+// Needed headers
+#include <vector>
+#include <cmath>
+#include "TLorentzVector.h"
+#include "ROOT/RVec.hxx"
+using ROOT::VecOps::RVec;
+// --------------------------------------------------------------------------
+// Build eta and phi for each 4-muonSV from its 4 muons
+std::pair<RVec<float>, RVec<float>> BuildFourMuonSVEtaPhi(
+    const RVec<float>& mu1pt, const RVec<float>& mu1eta, const RVec<float>& mu1phi,
+    const RVec<float>& mu2pt, const RVec<float>& mu2eta, const RVec<float>& mu2phi,
+    const RVec<float>& mu3pt, const RVec<float>& mu3eta, const RVec<float>& mu3phi,
+    const RVec<float>& mu4pt, const RVec<float>& mu4eta, const RVec<float>& mu4phi,
+    double mu_mass
+) {
+    RVec<float> vtx_eta, vtx_phi;
+    size_t n_vertices = std::min({mu1pt.size(), mu2pt.size(), mu3pt.size(), mu4pt.size()});
+    for (size_t i = 0; i < n_vertices; ++i) {
+        TLorentzVector v1, v2, v3, v4;
+        v1.SetPtEtaPhiM(mu1pt[i], mu1eta[i], mu1phi[i], mu_mass);
+        v2.SetPtEtaPhiM(mu2pt[i], mu2eta[i], mu2phi[i], mu_mass);
+        v3.SetPtEtaPhiM(mu3pt[i], mu3eta[i], mu3phi[i], mu_mass);
+        v4.SetPtEtaPhiM(mu4pt[i], mu4eta[i], mu4phi[i], mu_mass);
+        TLorentzVector sv = v1 + v2 + v3 + v4;
+        vtx_eta.push_back(sv.Eta());
+        vtx_phi.push_back(sv.Phi());
+    }
+    return {vtx_eta, vtx_phi};
+}
+// --------------------------------------------------------------------------
+// Flag per ogni fourmuonSV: 1 se associato a un dark pion che
+// decade in 2 dark photons -> 2 muons ciascuno, altrimenti 0
+RVec<int> FourMuonSVMatchedFlagPerVertex(
+    const RVec<float>& vtx_eta, 
+    const RVec<float>& vtx_phi,
+    const RVec<int>& pdgId,
+    const RVec<float>& pion_eta,
+    const RVec<float>& pion_phi,
+    const RVec<int>& isDarkPion_in2darkPhotons_into2muons, // precomputed pion flag
+    int pdgID_darkpion,
+    double dr_threshold
+) {
+    RVec<int> flags(vtx_eta.size(), 0);
+
+    for (size_t ivtx = 0; ivtx < vtx_eta.size(); ++ivtx) {
+        for (size_t ip = 0; ip < pdgId.size(); ++ip) {
+            if (pdgId[ip] != pdgID_darkpion) continue;
+            if (isDarkPion_in2darkPhotons_into2muons[ip] != 1) continue;
+
+            // match vertex to pion direction
+            if (deltaR(vtx_eta[ivtx], vtx_phi[ivtx], pion_eta[ip], pion_phi[ip]) < dr_threshold) {
+                flags[ivtx] = 1;
+                break; // basta un pion matchato
+            }
+        }
+    }
+    return flags;
+}
+// --------------------------------------------------------------------------
+
+// --------------------------------------------------------------------------
+// Compute pt of all four-muon secondary vertices (SVs)
+// Arguments: kinematics of the 4 muons forming each SV
+// Assumes constant muon mass (e.g. 0.105 GeV)
+RVec<float> GetFourMuonSVpt(
+    const RVec<float>& mu1pt, const RVec<float>& mu1eta, const RVec<float>& mu1phi,
+    const RVec<float>& mu2pt, const RVec<float>& mu2eta, const RVec<float>& mu2phi,
+    const RVec<float>& mu3pt, const RVec<float>& mu3eta, const RVec<float>& mu3phi,
+    const RVec<float>& mu4pt, const RVec<float>& mu4eta, const RVec<float>& mu4phi,
+    double mu_mass = 0.105
+) {
+    RVec<float> pts;
+    for (size_t i=0; i<mu1pt.size(); ++i) {
+        TLorentzVector v1, v2, v3, v4;
+        v1.SetPtEtaPhiM(mu1pt[i], mu1eta[i], mu1phi[i], mu_mass);
+        v2.SetPtEtaPhiM(mu2pt[i], mu2eta[i], mu2phi[i], mu_mass);
+        v3.SetPtEtaPhiM(mu3pt[i], mu3eta[i], mu3phi[i], mu_mass);
+        v4.SetPtEtaPhiM(mu4pt[i], mu4eta[i], mu4phi[i], mu_mass);
+        TLorentzVector sv = v1 + v2 + v3 + v4;
+        pts.push_back(sv.Pt());
+    }
+    return pts;
+}
+// --------------------------------------------------------------------------
+
+// --------------------------------------------------------------------------
+// Compute pt of only matched four-muon SVs
+RVec<float> GetMatchedFourMuonSVpt(
+    const RVec<float>& mu1pt, const RVec<float>& mu1eta, const RVec<float>& mu1phi,
+    const RVec<float>& mu2pt, const RVec<float>& mu2eta, const RVec<float>& mu2phi,
+    const RVec<float>& mu3pt, const RVec<float>& mu3eta, const RVec<float>& mu3phi,
+    const RVec<float>& mu4pt, const RVec<float>& mu4eta, const RVec<float>& mu4phi,
+    const RVec<int>& sv_matched_flags,   // 1 = matched, 0 = not matched
+    double mu_mass = 0.105
+) {
+    RVec<float> pts;
+    for (size_t i=0; i<mu1pt.size(); ++i) {
+        if (sv_matched_flags[i] != 1) continue;
+        TLorentzVector v1, v2, v3, v4;
+        v1.SetPtEtaPhiM(mu1pt[i], mu1eta[i], mu1phi[i], mu_mass);
+        v2.SetPtEtaPhiM(mu2pt[i], mu2eta[i], mu2phi[i], mu_mass);
+        v3.SetPtEtaPhiM(mu3pt[i], mu3eta[i], mu3phi[i], mu_mass);
+        v4.SetPtEtaPhiM(mu4pt[i], mu4eta[i], mu4phi[i], mu_mass);
+        TLorentzVector sv = v1 + v2 + v3 + v4;
+        pts.push_back(sv.Pt());
+    }
+    return pts;
+}
+
+""")
+
+df = (
+    df
+    # costruisci η e φ dei vertici fourmuonSV
+    .Define("fourmuonSV_eta_phi",
+            f"BuildFourMuonSVEtaPhi(fourmuonSV_mu1pt, fourmuonSV_mu1eta, fourmuonSV_mu1phi, "
+            f"fourmuonSV_mu2pt, fourmuonSV_mu2eta, fourmuonSV_mu2phi, "
+            f"fourmuonSV_mu3pt, fourmuonSV_mu3eta, fourmuonSV_mu3phi, "
+            f"fourmuonSV_mu4pt, fourmuonSV_mu4eta, fourmuonSV_mu4phi, {muon_mass})")
+
+    .Define("fourmuonSV_eta", "fourmuonSV_eta_phi.first")
+    .Define("fourmuonSV_phi", "fourmuonSV_eta_phi.second")
+)
+    # flag per ogni fourmuonSV
+df = df.Define("fourmuonSV_matched_flags",
+            f"FourMuonSVMatchedFlagPerVertex(fourmuonSV_eta, fourmuonSV_phi, "
+            f"GenPart_pdgId, GenPart_eta, GenPart_phi, "
+            f"isDarkPion_in2darkPhotons_into2muons, {pdgID_darkpion}, {deltaR_threshold})")
+
+df = df.Define("fourmuonSV_pt", 
+    "GetFourMuonSVpt(fourmuonSV_mu1pt, fourmuonSV_mu1eta, fourmuonSV_mu1phi,"
+    "fourmuonSV_mu2pt, fourmuonSV_mu2eta, fourmuonSV_mu2phi,"
+    "fourmuonSV_mu3pt, fourmuonSV_mu3eta, fourmuonSV_mu3phi,"
+    "fourmuonSV_mu4pt, fourmuonSV_mu4eta, fourmuonSV_mu4phi)"
+)
+
+df = df.Define("fourmuonSV_pt_matched", 
+    "GetMatchedFourMuonSVpt(fourmuonSV_mu1pt, fourmuonSV_mu1eta, fourmuonSV_mu1phi,"
+    "fourmuonSV_mu2pt, fourmuonSV_mu2eta, fourmuonSV_mu2phi,"
+    "fourmuonSV_mu3pt, fourmuonSV_mu3eta, fourmuonSV_mu3phi,"
+    "fourmuonSV_mu4pt, fourmuonSV_mu4eta, fourmuonSV_mu4phi,"
+    "fourmuonSV_matched_flags)"
+)
+
+df = df.Define("nFourmuonSV_matched", "Sum(fourmuonSV_matched_flags==1)")
+
+nFourmuonSV = df.Sum("nfourmuonSV").GetValue()
+nFourmuonSV_matched = df.Sum("nFourmuonSV_matched").GetValue()
+
+print("Number of fourmuonSVs: ", nFourmuonSV)
+print("Number of fourmuonSVs matched to dark pions → 2 dark photons → 2 muons each: ", nFourmuonSV_matched)
+
+histo_fourmuonSVs = df.Histo1D(
+    ("h_all", "All fourmuonSVs p_{T};p_{T} [GeV];Entries", 90, 0, 100),
+    "fourmuonSV_pt"
+).Clone()
+
+histo_fourmuonSVs_matched = df.Histo1D(
+    ("h_matched", "Matched fourmuonSVs p_{T};p_{T} [GeV];Entries", 90, 0, 100),
+    "fourmuonSV_pt_matched"
+).Clone()
+histo_fourmuonSVs_matched.SetLineColor(ROOT.kRed)
+
+c = ROOT.TCanvas()
+histo_fourmuonSVs.Draw()
+histo_fourmuonSVs_matched.Draw("SAME")
+c.SaveAs("FourmuonSVs_pt.png")
+
+print(histo_fourmuonSVs.Integral())
+print(histo_fourmuonSVs_matched.Integral())
+
+purity = (histo_fourmuonSVs_matched.Integral()/histo_fourmuonSVs.Integral()) * 100
+print(f"Purity = {purity:.4f} %")
+
+pur=ROOT.TEfficiency(histo_fourmuonSVs_matched,histo_fourmuonSVs)
+c3 = ROOT.TCanvas()
+pur.Draw("AP")  # "AP" = Axis + Points
+c3.Update()
+c3.SaveAs("PUR_fourmuonSVs_pt_vs_Matched.png")
+
+nfourmuonSV_histo = df.Histo1D(
+    ("h_all", ";Entries", 10, 0.50, 10.5),
+    "nfourmuonSV"
+).Clone()
+nfourmuonSV_matched_histo = df.Histo1D(
+    ("h_matched", "Matched fourmuonSVs;Entries", 10, 0.50, 10.5),
+    "nFourmuonSV_matched"
+).Clone()
+
+c3 = ROOT.TCanvas()
+nfourmuonSV_histo.Draw()
+nfourmuonSV_matched_histo.Draw("SAME")
+nfourmuonSV_matched_histo.SetLineColor(ROOT.kRed)
+nfourmuonSV_matched_histo.SetLineStyle(2)
+
+c3.Update()
+c3.SaveAs("nFourMuonSVs_distr.png")
+
+print("nFourMuonSVs:", nfourmuonSV_histo.Integral(0,91))
+print("nFourMuonSVs matched:", nfourmuonSV_matched_histo.Integral(0,91))
+
+
 
