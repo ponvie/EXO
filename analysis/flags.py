@@ -21,8 +21,7 @@ pdgID_darkpion   = 4900111
 deltaR_threshold = 0.5
 muon_mass        = 0.105
 
-nEvents = df.Count().GetValue()
-print("Total number of events:", nEvents)
+
 
 
 # Step 1: Select events where the HLT path fired
@@ -167,20 +166,14 @@ bool AtLeastOneHLT(
 
 """)
 
+nEvents = df.Count().GetValue()
+print("Total number of events:", nEvents)
 #------------------------------------------------------------------------------------------------------#
 #HLT general mask
 #------------------------------------------------------------------------------------------------------#
 
 df = df.Define("MuonFiredHLT_mask",
                "MuonsFiredHLT(MuonBPark_fired_HLT_Mu10_Barrel_L1HP11_IP6)")
-
-df = df.Define("nMuons", "Muon_pt.size()")  
-total_muons = df.Sum("nMuons")
-
-df = df.Define("nSelectedMuons", "Muon_pt[MuonFiredHLT_mask].size()")
-selected_muons = df.Sum("nSelectedMuons")
-
-
 
 #------------------------------------------------------------------------------------------------------#
 #Before loose mask
@@ -189,16 +182,12 @@ selected_muons = df.Sum("nSelectedMuons")
 df = df.Define("svResult", "SelectSV_independent(fourmuonSV_chi2, fourmuonSV_mu1index, fourmuonSV_mu2index, fourmuonSV_mu3index, fourmuonSV_mu4index, muonSV_chi2, muonSV_mass, muonSV_mu1eta, muonSV_mu1phi, muonSV_mu2eta, muonSV_mu2phi, muonSV_mu1index, muonSV_mu2index)")
 
 df = df.Define("isFourMuonSV", "svResult.isFourMuonSV")
-total_fourmuonsSV = df.Sum("isFourMuonSV")
-
 df = df.Define("isMultiMuonSV", "svResult.isMultiMuonSV")
-total_multimuonsSV = df.Sum("isMultiMuonSV")
-
 df = df.Define("isSingleMuonSV", "svResult.isSingleMuonSV")
-total_singlemuonSV = df.Sum("isSingleMuonSV")
 
-
-
+total_fourmuonsSV     = df.Filter("isFourMuonSV").Count()
+total_multimuonsSV    = df.Filter("isMultiMuonSV").Count()
+total_singlemuonSV    = df.Filter("isSingleMuonSV").Count()
 #------------------------------------------------------------------------------------------------------#
 #After loose mask
 #------------------------------------------------------------------------------------------------------#
@@ -207,14 +196,12 @@ df = df.Define("all_muons_are_loose",
                "SVAllLoose(MuonBPark_looseId, svResult.muonIndices)")
 
 df = df.Define("isFourMuonSV_LOOSE", "(isFourMuonSV && all_muons_are_loose)")
-loose_fourmuonsSV = df.Sum("isFourMuonSV_LOOSE")
-
 df = df.Define("isMultiMuonSV_LOOSE", "(isMultiMuonSV && all_muons_are_loose)")
-loose_multimuonsSV = df.Sum("isMultiMuonSV_LOOSE")
-
 df = df.Define("isSingleMuonSV_LOOSE", "(isSingleMuonSV && all_muons_are_loose)")
-loose_singlemuonSV = df.Sum("isSingleMuonSV_LOOSE")
 
+loose_fourmuonsSV     = df.Filter("isFourMuonSV_LOOSE").Count()
+loose_multimuonsSV    = df.Filter("isMultiMuonSV_LOOSE").Count()
+loose_singlemuonSV    = df.Filter("isSingleMuonSV_LOOSE").Count()
 
 #------------------------------------------------------------------------------------------------------#
 #At least one muon fired HLT mask
@@ -223,29 +210,42 @@ df = df.Define("at_least_one_HLT",
                "AtLeastOneHLT(MuonFiredHLT_mask, svResult.muonIndices)")
 
 df = df.Define("isFourMuonSV_LOOSE_HLT", "(isFourMuonSV && all_muons_are_loose && at_least_one_HLT)")
-loose_HLT_fourmuonsSV = df.Sum("isFourMuonSV_LOOSE")
-
-
 df = df.Define("isMultiMuonSV_LOOSE_HLT", "(isMultiMuonSV && all_muons_are_loose && at_least_one_HLT)")
-loose_HLT_multimuonsSV = df.Sum("isMultiMuonSV_LOOSE_HLT")
-
-
 df = df.Define("isSingleMuonSV_LOOSE_HLT", "(isSingleMuonSV && all_muons_are_loose && at_least_one_HLT)")
-loose_HLT_singlemuonSV = df.Sum("isSingleMuonSV_LOOSE_HLT")
+
+loose_HLT_fourmuonsSV   = df.Filter("isFourMuonSV_LOOSE_HLT").Count()
+loose_HLT_multimuonsSV  = df.Filter("isMultiMuonSV_LOOSE_HLT").Count()
+loose_HLT_singlemuonSV  = df.Filter("isSingleMuonSV_LOOSE_HLT").Count()
 
 
+def print_table_row(label, count):
+    val = count.GetValue()
+    return f"{label:<35} {val:>10}   {100.0*val/nEvents:6.2f}%"
 
-print("Total muons before mask:", total_muons.GetValue())
-print("Total muons after mask:", selected_muons.GetValue())
-print("\n")
-print("isFourMuonSV:", total_fourmuonsSV.GetValue())
-print("isMultiMuonSV:", total_multimuonsSV.GetValue())
-print("isSingleMuonSV:", total_singlemuonSV.GetValue())
-print("\n")
-print("isFourMuonSV LOOSE:", loose_fourmuonsSV.GetValue())
-print("isMultiMuonSV LOOSE:", loose_multimuonsSV.GetValue())
-print("isSingleMuonSV LOOSE:", loose_singlemuonSV.GetValue())
-print("\n")
-print("isFourMuonSV LOOSE + 1 muon fired HLT:", loose_HLT_fourmuonsSV.GetValue())
-print("isMultiMuonSV LOOSE + 1 muon fired HLT:", loose_HLT_multimuonsSV.GetValue())
-print("isSingleMuonSV LOOSE + 1 muon fired HLT:", loose_HLT_singlemuonSV.GetValue())
+print("\nSelections summary (per-event counts):")
+print("="*60)
+print(f"{'Selection':<35} {'Events':>10}   {'Fraction':>8}")
+print("="*60)
+
+# Before Loose
+print(print_table_row("isFourMuonSV", total_fourmuonsSV))
+print(print_table_row("isMultiMuonSV", total_multimuonsSV))
+print(print_table_row("isSingleMuonSV", total_singlemuonSV))
+
+print("-"*60)
+
+# After Loose
+print(print_table_row("isFourMuonSV LOOSE", loose_fourmuonsSV))
+print(print_table_row("isMultiMuonSV LOOSE", loose_multimuonsSV))
+print(print_table_row("isSingleMuonSV LOOSE", loose_singlemuonSV))
+
+print("-"*60)
+
+# After Loose + ≥1 HLT
+print(print_table_row("isFourMuonSV LOOSE + ≥1 HLT", loose_HLT_fourmuonsSV))
+print(print_table_row("isMultiMuonSV LOOSE + ≥1 HLT", loose_HLT_multimuonsSV))
+print(print_table_row("isSingleMuonSV LOOSE + ≥1 HLT", loose_HLT_singlemuonSV))
+
+#print("="*60)
+#print(f"{'Total events':<35} {nEvents:>10}")
+#print("="*60)
