@@ -58,7 +58,12 @@ struct SVSelectionResult {
     bool isFourMuonSV;
     bool isMultiMuonSV;
     bool isSingleMuonSV;
-    RVec<int> muonIndices; // store muon indices from the selected SV
+
+    int selectedFourMuonSV;  // index of chosen four-muon SV (-1 if none)
+    std::pair<int,int> selectedTwoMuonSVs; // indices of the chosen pair (-1,-1 if none)
+    int selectedSingleMuonSV; // index of chosen single SV (-1 if none)
+
+    RVec<int> muonIndices; // optional: keep all muon indices used
 };
 
 // Check ΔR
@@ -84,13 +89,13 @@ SVSelectionResult SelectSV_independent(
     const RVec<int>& muonSV_mu1index,
     const RVec<int>& muonSV_mu2index
 ) {
-    SVSelectionResult result{false, false, false, {}};
+    SVSelectionResult result{false, false, false, -1, {-1,-1}, -1, {}};
 
     // --- Four-muon SV check ---
     for (size_t i = 0; i < fourmuonSV_chi2.size(); ++i) {
         if (fourmuonSV_chi2[i] < 10) {
             result.isFourMuonSV = true;
-            // could push_back instead of overwrite if you want to keep multiple
+            result.selectedFourMuonSV = i;
             result.muonIndices.insert(result.muonIndices.end(),
                 {fourmuonSV_mu1index[i], fourmuonSV_mu2index[i],
                  fourmuonSV_mu3index[i], fourmuonSV_mu4index[i]});
@@ -113,6 +118,7 @@ SVSelectionResult SelectSV_independent(
             float relDiff = std::fabs(goodSVs[i].mass - goodSVs[j].mass) / goodSVs[i].mass;
             if (relDiff < 0.03) {
                 result.isMultiMuonSV = true;
+                result.selectedTwoMuonSVs = {goodSVs[i].idx, goodSVs[j].idx};
                 result.muonIndices.insert(result.muonIndices.end(),
                     {muonSV_mu1index[goodSVs[i].idx], muonSV_mu2index[goodSVs[i].idx],
                      muonSV_mu1index[goodSVs[j].idx], muonSV_mu2index[goodSVs[j].idx]});
@@ -120,15 +126,15 @@ SVSelectionResult SelectSV_independent(
         }
     }
 
-    // If at least one good single-SV exists
+    // Single SV: best chi2
     if (!goodSVs.empty()) {
         result.isSingleMuonSV = true;
-        int bestIdx = std::min_element(
+        auto bestIt = std::min_element(
             goodSVs.begin(), goodSVs.end(),
-            [](const SV& a, const SV& b){ return a.chi2 < b.chi2; }
-        )->idx;
+            [](const SV& a, const SV& b){ return a.chi2 < b.chi2; });
+        result.selectedSingleMuonSV = bestIt->idx;
         result.muonIndices.insert(result.muonIndices.end(),
-            {muonSV_mu1index[bestIdx], muonSV_mu2index[bestIdx]});
+            {muonSV_mu1index[bestIt->idx], muonSV_mu2index[bestIt->idx]});
     }
 
     return result;
@@ -169,12 +175,12 @@ df = df.Define("MuonFiredHLT_mask",
                "MuonsFiredHLT(MuonBPark_fired_HLT_Mu10_Barrel_L1HP11_IP6)")
 
 df = df.Define("nMuons", "Muon_pt.size()")  
-total_muons = df.Sum("nMuons").GetValue()
-print("Total muons before mask:", total_muons)
+total_muons = df.Sum("nMuons")
+
 df = df.Define("nSelectedMuons", "Muon_pt[MuonFiredHLT_mask].size()")
-selected_muons = df.Sum("nSelectedMuons").GetValue()
-print("Total muons after mask:", selected_muons)
-print("\n")
+selected_muons = df.Sum("nSelectedMuons")
+
+
 
 #------------------------------------------------------------------------------------------------------#
 #Before loose mask
@@ -183,17 +189,15 @@ print("\n")
 df = df.Define("svResult", "SelectSV_independent(fourmuonSV_chi2, fourmuonSV_mu1index, fourmuonSV_mu2index, fourmuonSV_mu3index, fourmuonSV_mu4index, muonSV_chi2, muonSV_mass, muonSV_mu1eta, muonSV_mu1phi, muonSV_mu2eta, muonSV_mu2phi, muonSV_mu1index, muonSV_mu2index)")
 
 df = df.Define("isFourMuonSV", "svResult.isFourMuonSV")
-total_fourmuonsSV = df.Sum("isFourMuonSV").GetValue()
-print("isFourMuonSV:", total_fourmuonsSV)
+total_fourmuonsSV = df.Sum("isFourMuonSV")
 
 df = df.Define("isMultiMuonSV", "svResult.isMultiMuonSV")
-total_multimuonsSV = df.Sum("isMultiMuonSV").GetValue()
-print("isMultiMuonSV:", total_multimuonsSV)
+total_multimuonsSV = df.Sum("isMultiMuonSV")
 
 df = df.Define("isSingleMuonSV", "svResult.isSingleMuonSV")
-total_singlemuonSV = df.Sum("isSingleMuonSV").GetValue()
-print("isSingleMuonSV:", total_singlemuonSV)
-print("\n")
+total_singlemuonSV = df.Sum("isSingleMuonSV")
+
+
 
 #------------------------------------------------------------------------------------------------------#
 #After loose mask
@@ -203,17 +207,15 @@ df = df.Define("all_muons_are_loose",
                "SVAllLoose(MuonBPark_looseId, svResult.muonIndices)")
 
 df = df.Define("isFourMuonSV_LOOSE", "(isFourMuonSV && all_muons_are_loose)")
-loose_fourmuonsSV = df.Sum("isFourMuonSV_LOOSE").GetValue()
-print("isFourMuonSV LOOSE:", loose_fourmuonsSV)
+loose_fourmuonsSV = df.Sum("isFourMuonSV_LOOSE")
 
 df = df.Define("isMultiMuonSV_LOOSE", "(isMultiMuonSV && all_muons_are_loose)")
-loose_multimuonsSV = df.Sum("isMultiMuonSV_LOOSE").GetValue()
-print("isMultiMuonSV LOOSE:", loose_multimuonsSV)
+loose_multimuonsSV = df.Sum("isMultiMuonSV_LOOSE")
 
 df = df.Define("isSingleMuonSV_LOOSE", "(isSingleMuonSV && all_muons_are_loose)")
-loose_singlemuonSV = df.Sum("isSingleMuonSV_LOOSE").GetValue()
-print("isSingleMuonSV LOOSE:", loose_singlemuonSV)
-print("\n")
+loose_singlemuonSV = df.Sum("isSingleMuonSV_LOOSE")
+
+
 #------------------------------------------------------------------------------------------------------#
 #At least one muon fired HLT mask
 #------------------------------------------------------------------------------------------------------#
@@ -221,13 +223,29 @@ df = df.Define("at_least_one_HLT",
                "AtLeastOneHLT(MuonFiredHLT_mask, svResult.muonIndices)")
 
 df = df.Define("isFourMuonSV_LOOSE_HLT", "(isFourMuonSV && all_muons_are_loose && at_least_one_HLT)")
-loose_HLT_fourmuonsSV = df.Sum("isFourMuonSV_LOOSE").GetValue()
-print("isFourMuonSV LOOSE + 1 muon fired HLT:", loose_HLT_fourmuonsSV)
+loose_HLT_fourmuonsSV = df.Sum("isFourMuonSV_LOOSE")
+
 
 df = df.Define("isMultiMuonSV_LOOSE_HLT", "(isMultiMuonSV && all_muons_are_loose && at_least_one_HLT)")
-loose_HLT_multimuonsSV = df.Sum("isMultiMuonSV_LOOSE_HLT").GetValue()
-print("isMultiMuonSV LOOSE + 1 muon fired HLT:", loose_HLT_multimuonsSV)
+loose_HLT_multimuonsSV = df.Sum("isMultiMuonSV_LOOSE_HLT")
+
 
 df = df.Define("isSingleMuonSV_LOOSE_HLT", "(isSingleMuonSV && all_muons_are_loose && at_least_one_HLT)")
-loose_HLT_singlemuonSV = df.Sum("isSingleMuonSV_LOOSE_HLT").GetValue()
-print("isSingleMuonSV LOOSE + 1 muon fired HLT:", loose_HLT_singlemuonSV)
+loose_HLT_singlemuonSV = df.Sum("isSingleMuonSV_LOOSE_HLT")
+
+
+
+print("Total muons before mask:", total_muons.GetValue())
+print("Total muons after mask:", selected_muons.GetValue())
+print("\n")
+print("isFourMuonSV:", total_fourmuonsSV.GetValue())
+print("isMultiMuonSV:", total_multimuonsSV.GetValue())
+print("isSingleMuonSV:", total_singlemuonSV.GetValue())
+print("\n")
+print("isFourMuonSV LOOSE:", loose_fourmuonsSV.GetValue())
+print("isMultiMuonSV LOOSE:", loose_multimuonsSV.GetValue())
+print("isSingleMuonSV LOOSE:", loose_singlemuonSV.GetValue())
+print("\n")
+print("isFourMuonSV LOOSE + 1 muon fired HLT:", loose_HLT_fourmuonsSV.GetValue())
+print("isMultiMuonSV LOOSE + 1 muon fired HLT:", loose_HLT_multimuonsSV.GetValue())
+print("isSingleMuonSV LOOSE + 1 muon fired HLT:", loose_HLT_singlemuonSV.GetValue())
