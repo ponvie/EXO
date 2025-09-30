@@ -1,4 +1,4 @@
-# add to ROOT_muonSV.py before running 
+# add to ROOT_muonSVs.py before running 
 
 import ROOT
 from plotting_tools.root import get_labels, Canvas
