@@ -1,4 +1,4 @@
-# Run after ROOT_MuonSVs.py
+# Run after ROOT_muonSVs.py
 # --- Declare C++ helper functions ---
 ROOT.gInterpreter.Declare("""
 
