@@ -61,13 +61,13 @@ RVec<bool> MuonsFiredHLT(const RVec<int>& firedHLT) {
     }
 
 struct SVSelectionResult {
-    bool isFourMuonSV;
-    bool isMultiMuonSV;
-    bool isSingleMuonSV;
+    bool isFourMuonSV = false;
+    bool isMultiMuonSV = false;
+    bool isSingleMuonSV = false;
 
-    int selectedFourMuonSV;  // index of chosen four-muon SV (-1 if none)
-    std::pair<int,int> selectedTwoMuonSVs; // indices of the chosen pair (-1,-1 if none)
-    int selectedSingleMuonSV; // index of chosen single SV (-1 if none)
+    int selectedFourMuonSV = -1;  // index of chosen four-muon SV (-1 if none)
+    std::pair<int,int> selectedTwoMuonSVs = {-1, -1}; // indices of the chosen pair (-1,-1 if none)
+    int selectedSingleMuonSV = -1; // index of chosen single SV (-1 if none)
 
     RVec<int> muonIndices; // optional: keep all muon indices used
 };
@@ -96,7 +96,8 @@ SVSelectionResult SelectSV(
     const RVec<int>& muonSV_mu1index,
     const RVec<int>& muonSV_mu2index
 ) {
-    SVSelectionResult result{false, false, false, {}};
+    //SVSelectionResult result{false, false, false, {}};
+    SVSelectionResult result;
 
     // Step 1: Check four-muon SV with chi2 < 10
     for (size_t i = 0; i < fourmuonSV_chi2.size(); ++i) {
@@ -104,6 +105,7 @@ SVSelectionResult SelectSV(
             result.isFourMuonSV = true;
             result.muonIndices = {fourmuonSV_mu1index[i], fourmuonSV_mu2index[i],
                                   fourmuonSV_mu3index[i], fourmuonSV_mu4index[i]};
+            result.selectedFourMuonSV = i;
             return result;
         }
     }
@@ -145,6 +147,7 @@ SVSelectionResult SelectSV(
         result.muonIndices = {
             muonSV_mu1index[bestPair1], muonSV_mu2index[bestPair1],
             muonSV_mu1index[bestPair2], muonSV_mu2index[bestPair2]};
+        result.selectedTwoMuonSVs = {bestPair1, bestPair2};
         return result;
     }
 
@@ -161,6 +164,7 @@ SVSelectionResult SelectSV(
         if (bestIdx != -1) {
             result.isSingleMuonSV = true;
             result.muonIndices = {muonSV_mu1index[bestIdx], muonSV_mu2index[bestIdx]};
+            result.selectedSingleMuonSV = bestIdx;
             return result;
         }
     }
@@ -193,6 +197,26 @@ bool AtLeastOneHLT(
     return false;
 }
 
+// HLT firing status of all the muons from the selected event SV
+auto MuonIsHLTMatched(
+    const RVec<bool>& muonHLTmask,
+    const RVec<int>& muonIdxs
+) {
+    RVec<bool> matched;
+    if (muonIdxs.size() == 0) return matched;
+
+    // Loop over all muons
+    for (size_t i = 0; i < muonIdxs.size(); ++i){
+        // Skip invalid muons
+        if (muonIdxs[i] < 0) continue;
+        // Check if muon fired HLT
+        if (muonHLTmask[muonIdxs[i]]) matched.push_back(true);
+        else matched.push_back(false);
+    }
+
+    return matched;
+}
+
 
 """)
 
@@ -209,11 +233,46 @@ df = df.Define("MuonFiredHLT_mask",
 #Before loose mask
 #------------------------------------------------------------------------------------------------------#
 
+muonsv_branches = [c for c in df.GetColumnNames() if c.startswith("muonSV_")]
+fourmuonsv_branches = [c for c in df.GetColumnNames() if c.startswith("fourmuonSV_")]
+
+######## Filter out same-sign muonSVs ################
+df = df.Define("muonSV_isOS", "muonSV_charge==0")
+df = df.Define("fourmuonSV_isOS", "fourmuonSV_charge==0")
+
+for muonsv_branch in muonsv_branches:
+    df = df.Redefine(muonsv_branch, f"{muonsv_branch}[muonSV_isOS]")
+for fourmuonsv_branch in fourmuonsv_branches:
+    df = df.Redefine(fourmuonsv_branch, f"{fourmuonsv_branch}[fourmuonSV_isOS]")
+
+# Recount the number of SVs
+df = df.Redefine("nmuonSV", "muonSV_charge.size()")
+df = df.Redefine("nfourmuonSV", "fourmuonSV_charge.size()")
+
+######## Sort in increasing chi2 order ################
+# Note: This is optional since SelectSV saves the lowest chi2 SV anyways
+"""
+df = df.Define("muonSV_chi2order", "Argsort(muonSV_chi2)")
+df = df.Define("fourmuonSV_chi2order", "Argsort(fourmuonSV_chi2)")
+
+for muonsv_branch in muonsv_branches:
+    df = df.Redefine(muonsv_branch, f"Take({muonsv_branch}, muonSV_chi2order)")
+for fourmuonsv_branch in fourmuonsv_branches:
+    df = df.Redefine(fourmuonsv_branch, f"Take({fourmuonsv_branch}, fourmuonSV_chi2order)")
+"""
+
+######## Make the event SV of interest (at most one per event) ################
+
 df = df.Define("svResult", "SelectSV(fourmuonSV_chi2, fourmuonSV_mu1index, fourmuonSV_mu2index, fourmuonSV_mu3index, fourmuonSV_mu4index, muonSV_chi2, muonSV_mass, muonSV_mu1eta, muonSV_mu1phi, muonSV_mu2eta, muonSV_mu2phi, muonSV_mu1index, muonSV_mu2index)")
 
 df = df.Define("isFourMuonSV", "svResult.isFourMuonSV")
 df = df.Define("isMultiMuonSV", "svResult.isMultiMuonSV")
 df = df.Define("isSingleMuonSV", "svResult.isSingleMuonSV")
+
+# Save the indices of the best SV for each event
+df = df.Define("selectedFourMuonSV", "svResult.selectedFourMuonSV")
+df = df.Define("selectedTwoMuonSVs", "svResult.selectedTwoMuonSVs")
+df = df.Define("selectedSingleMuonSV", "svResult.selectedSingleMuonSV")
 
 total_fourmuonsSV     = df.Filter("isFourMuonSV").Count()
 total_multimuonsSV    = df.Filter("isMultiMuonSV").Count()
@@ -238,6 +297,9 @@ loose_singlemuonSV    = df.Filter("isSingleMuonSV_LOOSE").Count()
 #------------------------------------------------------------------------------------------------------#
 df = df.Define("at_least_one_HLT",
                "AtLeastOneHLT(MuonFiredHLT_mask, svResult.muonIndices)")
+# Find the HLT status of all the muons
+df = df.Define("svresult_muon_is_HLT_matched",
+                "MuonIsHLTMatched(MuonFiredHLT_mask, svResult.muonIndices)")
 
 df = df.Define("isFourMuonSV_LOOSE_HLT", "(isFourMuonSV && all_muons_are_loose && at_least_one_HLT)")
 df = df.Define("isMultiMuonSV_LOOSE_HLT", "(isMultiMuonSV && all_muons_are_loose && at_least_one_HLT)")
@@ -319,5 +381,9 @@ cols_to_save += [
     "isFourMuonSV_LOOSE_HLT", "isMultiMuonSV_LOOSE_HLT", "isSingleMuonSV_LOOSE_HLT",
     "nmuonSV", "nfourmuonSV"
 ]
+
+cols_to_save += ["selectedFourMuonSV", "selectedTwoMuonSVs", "selectedSingleMuonSV"]
+cols_to_save += ["svresult_muon_is_HLT_matched"]
+
 df.Snapshot("Events", args.output_root, cols_to_save)
 
