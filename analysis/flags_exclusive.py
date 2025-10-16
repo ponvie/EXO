@@ -17,7 +17,6 @@ import argparse
 # --- Argomenti da condor (input e output) --------------------
 parser = argparse.ArgumentParser()
 parser.add_argument("--input", required=True, help="Input ROOT file")
-parser.add_argument("--output_txt", required=True, help="Output TXT file")
 parser.add_argument("--output_json", required=True, help="Output JSON file")
 parser.add_argument("--output_root", required=True, help="Output ROOT file")
 args = parser.parse_args()
@@ -74,9 +73,10 @@ struct SVSelectionResult {
 
 // Check ΔR
 inline float deltaR(float eta1, float phi1, float eta2, float phi2) {
-    float deta = eta1 - eta2;
     float dphi = std::fabs(phi1 - phi2);
-    if (dphi > M_PI) dphi = 2*M_PI - dphi;
+    while (dphi > M_PI) dphi = 2*M_PI - dphi;
+    while (dphi < -M_PI) dphi = 2*M_PI + dphi;
+    float deta = eta1 - eta2;
     return std::sqrt(deta*deta + dphi*dphi);
 }
 
@@ -87,6 +87,7 @@ SVSelectionResult SelectSV(
     const RVec<int>& fourmuonSV_mu2index,
     const RVec<int>& fourmuonSV_mu3index,
     const RVec<int>& fourmuonSV_mu4index,
+    const RVec<int>& fourmuonSV_charge,
     const RVec<float>& muonSV_chi2,
     const RVec<float>& muonSV_mass,
     const RVec<float>& muonSV_mu1eta,
@@ -94,14 +95,15 @@ SVSelectionResult SelectSV(
     const RVec<float>& muonSV_mu2eta,
     const RVec<float>& muonSV_mu2phi,
     const RVec<int>& muonSV_mu1index,
-    const RVec<int>& muonSV_mu2index
+    const RVec<int>& muonSV_mu2index,
+    const RVec<int>& muonSV_charge
 ) {
     //SVSelectionResult result{false, false, false, {}};
     SVSelectionResult result;
 
     // Step 1: Check four-muon SV with chi2 < 10
     for (size_t i = 0; i < fourmuonSV_chi2.size(); ++i) {
-        if (fourmuonSV_chi2[i] < 10) {
+        if ((fourmuonSV_chi2[i] < 10) && (fourmuonSV_charge[i]==0)){
             result.isFourMuonSV = true;
             result.muonIndices = {fourmuonSV_mu1index[i], fourmuonSV_mu2index[i],
                                   fourmuonSV_mu3index[i], fourmuonSV_mu4index[i]};
@@ -118,10 +120,9 @@ SVSelectionResult SelectSV(
     };
     std::vector<SV> goodSVs;
     for (size_t i = 0; i < muonSV_chi2.size(); ++i) {
-        if (muonSV_chi2[i] >= 10) continue;
+        if (muonSV_chi2[i] >= 10 || muonSV_charge[i] != 0) continue;
         if (deltaR(muonSV_mu1eta[i], muonSV_mu1phi[i],
                    muonSV_mu2eta[i], muonSV_mu2phi[i]) >= 1.2) continue;
-
         goodSVs.push_back({(int)i, muonSV_chi2[i], muonSV_mass[i]});
     }
 
@@ -169,7 +170,7 @@ SVSelectionResult SelectSV(
         }
     }
 
-    return result; // nothing found
+    return result; 
 }
 
 
@@ -229,25 +230,19 @@ auto MuonIsHLTMatched(
 df = df.Define("MuonFiredHLT_mask",
                "MuonsFiredHLT(MuonBPark_fired_HLT_Mu10_Barrel_L1HP11_IP6)")
 
+# ------------------------------------------------------------------------------------------------------
+# Additional selections
+# ------------------------------------------------------------------------------------------------------
+
+# (2) Eventi con almeno un SV (singolo o four-muon)
+any_SV = df.Filter("(nmuonSV > 0) || (nfourmuonSV > 0)").Count()
+df = df.Filter("((nmuonSV > 0) || (nfourmuonSV > 0)) && Sum(MuonFiredHLT_mask) > 0")
+
+events_HLT_Mu10 = df.Count()
+
 #------------------------------------------------------------------------------------------------------#
 #Before loose mask
 #------------------------------------------------------------------------------------------------------#
-
-muonsv_branches = [c for c in df.GetColumnNames() if c.startswith("muonSV_")]
-fourmuonsv_branches = [c for c in df.GetColumnNames() if c.startswith("fourmuonSV_")]
-
-######## Filter out same-sign muonSVs ################
-df = df.Define("muonSV_isOS", "muonSV_charge==0")
-df = df.Define("fourmuonSV_isOS", "fourmuonSV_charge==0")
-
-for muonsv_branch in muonsv_branches:
-    df = df.Redefine(muonsv_branch, f"{muonsv_branch}[muonSV_isOS]")
-for fourmuonsv_branch in fourmuonsv_branches:
-    df = df.Redefine(fourmuonsv_branch, f"{fourmuonsv_branch}[fourmuonSV_isOS]")
-
-# Recount the number of SVs
-df = df.Redefine("nmuonSV", "muonSV_charge.size()")
-df = df.Redefine("nfourmuonSV", "fourmuonSV_charge.size()")
 
 ######## Sort in increasing chi2 order ################
 # Note: This is optional since SelectSV saves the lowest chi2 SV anyways
@@ -263,7 +258,7 @@ for fourmuonsv_branch in fourmuonsv_branches:
 
 ######## Make the event SV of interest (at most one per event) ################
 
-df = df.Define("svResult", "SelectSV(fourmuonSV_chi2, fourmuonSV_mu1index, fourmuonSV_mu2index, fourmuonSV_mu3index, fourmuonSV_mu4index, muonSV_chi2, muonSV_mass, muonSV_mu1eta, muonSV_mu1phi, muonSV_mu2eta, muonSV_mu2phi, muonSV_mu1index, muonSV_mu2index)")
+df = df.Define("svResult", "SelectSV(fourmuonSV_chi2, fourmuonSV_mu1index, fourmuonSV_mu2index, fourmuonSV_mu3index, fourmuonSV_mu4index, fourmuonSV_charge, muonSV_chi2, muonSV_mass, muonSV_mu1eta, muonSV_mu1phi, muonSV_mu2eta, muonSV_mu2phi, muonSV_mu1index, muonSV_mu2index, muonSV_charge)")
 
 df = df.Define("isFourMuonSV", "svResult.isFourMuonSV")
 df = df.Define("isMultiMuonSV", "svResult.isMultiMuonSV")
@@ -309,39 +304,13 @@ loose_HLT_fourmuonsSV   = df.Filter("isFourMuonSV_LOOSE_HLT").Count()
 loose_HLT_multimuonsSV  = df.Filter("isMultiMuonSV_LOOSE_HLT").Count()
 loose_HLT_singlemuonSV  = df.Filter("isSingleMuonSV_LOOSE_HLT").Count()
 
-bkg_events = 99864988
-sig_events = 1000000
-# ------------------------------------------------------------------------------------------------------
-# Tabella
-# ------------------------------------------------------------------------------------------------------
-def print_table_row(label, count):
-    val = count.GetValue()
-    return f"{label:<35} {val:>10}   {100.0*val/bkg_events:6.2f}%"
-
-lines = []
-lines.append("Selections summary (per-event counts):")
-lines.append(f"Total Events: , {bkg_events} ")
-#lines.append(f"FiredHLT Events: , {filtered_events.GetValue()} ")
-lines.append("="*60)
-lines.append(f"{'Selection':<35} {'Events':>10}   {'Fraction':>8}")
-lines.append("="*60)
-lines.append(print_table_row("isFourMuonSV", total_fourmuonsSV))
-lines.append(print_table_row("isMultiMuonSV", total_multimuonsSV))
-lines.append(print_table_row("isSingleMuonSV", total_singlemuonSV))
-lines.append("-"*60)
-lines.append(print_table_row("isFourMuonSV LOOSE", loose_fourmuonsSV))
-lines.append(print_table_row("isMultiMuonSV LOOSE", loose_multimuonsSV))
-lines.append(print_table_row("isSingleMuonSV LOOSE", loose_singlemuonSV))
-lines.append("-"*60)
-lines.append(print_table_row("isFourMuonSV LOOSE + ≥1 HLT", loose_HLT_fourmuonsSV))
-lines.append(print_table_row("isMultiMuonSV LOOSE + ≥1 HLT", loose_HLT_multimuonsSV))
-lines.append(print_table_row("isSingleMuonSV LOOSE + ≥1 HLT", loose_HLT_singlemuonSV))
-lines.append("="*60)
-
-# Scrivi su file txt
-with open(args.output_txt, "w") as f:
-    for l in lines:
-        f.write(l + "\n")
+#bkg_events = 99864988 #120to170
+#bkg_events = 93304586 #20to30
+#bkg_events = 94128199 #80to120
+#bkg_events = 107449521 #50to80
+#bkg_events = 1000000 #sig 
+#bkg_events = 998568 #sig2
+bkg_events = 1000000 #sig3 
 
 # ------------------------------------------------------------------------------------------------------
 # JSON - JavaScript Object Notation
@@ -353,6 +322,8 @@ results = {
     "TotalEvents": int(bkg_events),
     #"FiredHLTEvents": int(filtered_events.GetValue()),
     "Selections": {
+        "(nMuonSV>0)||(nFourMuonSV>0)": int(any_SV.GetValue()),
+        "Fired HLT": int(events_HLT_Mu10.GetValue()),
         "isFourMuonSV": int(total_fourmuonsSV.GetValue()),
         "isMultiMuonSV": int(total_multimuonsSV.GetValue()),
         "isSingleMuonSV": int(total_singlemuonSV.GetValue()),
@@ -379,11 +350,10 @@ cols_to_save += [
     "isFourMuonSV", "isMultiMuonSV", "isSingleMuonSV",
     "isFourMuonSV_LOOSE", "isMultiMuonSV_LOOSE", "isSingleMuonSV_LOOSE",
     "isFourMuonSV_LOOSE_HLT", "isMultiMuonSV_LOOSE_HLT", "isSingleMuonSV_LOOSE_HLT",
-    "nmuonSV", "nfourmuonSV"
+    "nmuonSV", "nfourmuonSV", "event"
 ]
 
 cols_to_save += ["selectedFourMuonSV", "selectedTwoMuonSVs", "selectedSingleMuonSV"]
 cols_to_save += ["svresult_muon_is_HLT_matched"]
 
 df.Snapshot("Events", args.output_root, cols_to_save)
-
